@@ -1,0 +1,310 @@
+openapi: 3.1.0
+info:
+  title: GitHub Issues Gateway
+  version: 1.0.0
+  description: A small service that wraps the GitHub REST API for Issues on a single repository.
+
+servers:
+  - url: http://localhost:8000
+
+paths:
+  /healthz:
+    get:
+      summary: Health check
+      security: []
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              example: { "status": "ok" }
+
+  /issues:
+    post:
+      summary: Create an issue
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: { type: string }
+                body: { type: string }
+                labels:
+                  type: array
+                  items: { type: string }
+            example:
+              title: "Bug: login fails"
+              body: "Steps to reproduce..."
+              labels: ["bug"]
+      responses:
+        "201":
+          description: Issue created
+          headers:
+            Location:
+              schema: { type: string }
+              description: Path to the new issue
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Issue"
+              example:
+                number: 1
+                html_url: "https://github.com/owner/repo/issues/1"
+                state: "open"
+                title: "Bug: login fails"
+                body: "Steps to reproduce..."
+                labels: ["bug"]
+                created_at: "2026-09-04T12:00:00Z"
+                updated_at: "2026-09-04T12:00:00Z"
+        "400":
+          description: Invalid payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example: { "error": "title is required" }
+        "401":
+          description: Missing or invalid GitHub token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example: { "error": "Bad credentials" }
+
+    get:
+      summary: List issues
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: state
+          in: query
+          schema: { type: string, enum: [open, closed, all], default: open }
+        - name: labels
+          in: query
+          schema: { type: string }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: per_page
+          in: query
+          schema: { type: integer, maximum: 100, default: 30 }
+      responses:
+        "200":
+          description: List of issues
+          headers:
+            Link:
+              schema: { type: string }
+              description: GitHub-style pagination links
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/IssueSummary"
+        "400":
+          description: Invalid query parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /issues/{number}:
+    get:
+      summary: Get a single issue
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: number
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: The issue
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Issue"
+        "404":
+          description: Issue not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example: { "error": "Not Found" }
+
+    patch:
+      summary: Update an issue (rename, edit body, close/open)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: number
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string }
+                body: { type: string }
+                state: { type: string, enum: [open, closed] }
+            example:
+              state: "closed"
+      responses:
+        "200":
+          description: Updated issue
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Issue"
+        "400":
+          description: Invalid state value
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example: { "error": "state must be 'open' or 'closed'" }
+        "404":
+          description: Issue not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /issues/{number}/comments:
+    post:
+      summary: Add a comment to an issue
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: number
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body: { type: string }
+            example:
+              body: "Thanks for reporting this!"
+      responses:
+        "201":
+          description: Comment created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Comment"
+        "400":
+          description: Invalid payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /webhook:
+    post:
+      summary: Receive a GitHub webhook delivery
+      description: Verifies the X-Hub-Signature-256 header against WEBHOOK_SECRET.
+      security: []
+      responses:
+        "204":
+          description: Event accepted
+        "400":
+          description: Unknown event type
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Invalid signature
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example: { "error": "invalid signature" }
+
+  /events:
+    get:
+      summary: List recently processed webhook deliveries
+      security: []
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20 }
+      responses:
+        "200":
+          description: Recent events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WebhookEvent"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Server-side bearer token used internally to authenticate to the GitHub API.
+
+  schemas:
+    Issue:
+      type: object
+      properties:
+        number: { type: integer }
+        html_url: { type: string }
+        state: { type: string, enum: [open, closed] }
+        title: { type: string }
+        body: { type: ["string", "null"] }
+        labels:
+          type: array
+          items: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    IssueSummary:
+      type: object
+      properties:
+        number: { type: integer }
+        title: { type: string }
+        state: { type: string }
+        labels:
+          type: array
+          items: { type: string }
+
+    Comment:
+      type: object
+      properties:
+        id: { type: integer }
+        body: { type: string }
+        user: { type: string }
+        created_at: { type: string, format: date-time }
+        html_url: { type: string }
+
+    WebhookEvent:
+      type: object
+      properties:
+        id: { type: string }
+        event: { type: string }
+        action: { type: string }
+        issue_number: { type: ["integer", "null"] }
+        timestamp: { type: number }
+
+    Error:
+      type: object
+      properties:
+        error: { type: string }
