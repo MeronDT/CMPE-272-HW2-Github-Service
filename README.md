@@ -2,10 +2,6 @@
 
 A small service that wraps the GitHub REST API for Issues on a single repository. Exposes a simplified HTTP API for issue CRUD and comments, receives and verifies GitHub webhooks, and provides an OpenAPI 3.1 contract, automated tests, and Docker packaging.
 
-## Author
-
-Meron (sole contributor) — see source file headers for per-file authorship notes.
-
 ## How to run locally
 
 ### Option A — Docker
@@ -97,10 +93,51 @@ curl http://localhost:8000/events
 curl http://localhost:8000/healthz
 ```
 
+**Simulate a webhook delivery** (for manual testing without a real GitHub event)
+```bash
+BODY='{"zen": "test", "action": "opened"}'
+SECRET="your-webhook-secret"
+SIG="sha256=$(echo -n "$BODY" | openssl dgst -sha256 -hmac "$SECRET" | sed 's/^.* //')"
+
+curl -X POST http://localhost:8000/webhook \
+  -H "Content-Type: application/json" \
+  -H "X-GitHub-Event: ping" \
+  -H "X-GitHub-Delivery: manual-test-1" \
+  -H "X-Hub-Signature-256: $SIG" \
+  -d "$BODY"
+```
+
 > Note: on Windows PowerShell, `curl` is aliased to `Invoke-WebRequest`, which does not accept the flags above the same way. Use `curl.exe` explicitly (e.g. `curl.exe -X POST ...`), or use `Invoke-RestMethod` with PowerShell-native syntax, e.g.:
 > ```powershell
 > Invoke-RestMethod -Uri "http://localhost:8000/issues" -Method Post -ContentType "application/json" -Body '{"title": "Test issue"}'
 > ```
+
+### HTTPie equivalents
+
+The same routes using [HTTPie](https://httpie.io/) syntax (`pip install httpie`):
+
+```bash
+# Create an issue
+http POST localhost:8000/issues title="Bug: login fails" body="Steps to reproduce..." labels:='["bug"]'
+
+# List issues
+http GET localhost:8000/issues state==open per_page==30
+
+# Get a single issue
+http GET localhost:8000/issues/1
+
+# Update an issue
+http PATCH localhost:8000/issues/1 state=closed
+
+# Add a comment
+http POST localhost:8000/issues/1/comments body="Thanks for reporting this!"
+
+# View recent webhook events
+http GET localhost:8000/events
+
+# Health check
+http GET localhost:8000/healthz
+```
 
 ## Webhook setup
 
